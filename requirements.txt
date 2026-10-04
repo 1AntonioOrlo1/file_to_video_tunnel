@@ -1,0 +1,7 @@
+# Python deps for the QUIC-inside-video tunnel (and the QUIC-underlay stack).
+# The SRT/ffmpeg stacks are pure-ffmpeg + stdlib.
+# System deps (not pip): ffmpeg with libx264 + libass + SRT support.
+aioquic>=1.0
+cryptography>=42.0
+numpy>=1.26
+Pillow>=10.0

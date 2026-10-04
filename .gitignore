@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+
+# test / bench artifacts
+*.log
+*.err
+*.raw
+*.h264
+*.ts
+*.mp4
+*.bin
+*.out
+*.dump
+quic_dump*
+srt_capture*
+
+# run-output dirs
+e2e/
+e2e2/
+e2e3/
+e2e2_loss/
+tunnel_out/
+quic_dbg/
+quic_test/
+quic_e2e_*/
+quic_failover_*/
+quic_stream_*/
+diag_late/
+
+# old-stack generated cert/key artifacts (the current node generates its
+# own self-signed cert at runtime)
+quic_cert.pem
+quic_key.pem
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
