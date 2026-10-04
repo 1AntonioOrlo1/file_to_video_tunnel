@@ -429,7 +429,13 @@ class VideoLink:
         # cannot keep up (4K render is ~23 ms of numpy per group) the
         # queue fills and emit drops the datagram — it then stays
         # un-ACKed in QUIC, which retransmits it (see _render).
-        self._render_q = asyncio.Queue(maxsize=8)
+        # Size is tunable (VQIC_RENDER_Q): a QUIC retransmit BURST hands
+        # many groups to the video in one loop tick, and a small queue
+        # turns that burst into drops -> more retransmits -> a storm
+        # (seen at 720p: render_drop 700+, up 2.8x). Payloads are small
+        # (B bytes: 5376 at 720p, 48576 at 4K), so even 64 is a few MB.
+        self._render_q = asyncio.Queue(
+            maxsize=int(os.environ.get('VQIC_RENDER_Q', '128')))
         # staging holds FULL rendered frames (24.9 MB each at 4K). The
         # render thread is faster than the video clock, so without a cap
         # staging grows until it OOMs (4K: ~1.4 GB free RAM). Cap it by
