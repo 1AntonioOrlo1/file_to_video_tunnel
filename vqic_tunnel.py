@@ -1007,6 +1007,18 @@ class Node:
         self.stop = asyncio.Event()
         self.tunnel_ready = asyncio.Event()
         self.link = VideoLink(args, args.width, args.height, args.fps)
+        # Size the constant-window CC to the carrier's BDP so the pipe stays
+        # full at ANY fps/resolution. capacity = B*fps/R bytes/s per
+        # direction; a bidirectional flow (the echo, or real two-way traffic)
+        # keeps both directions in flight, so window = 2*capacity*RTT. At
+        # 60 fps the BDP doubles vs 30 and a stale fixed window starves the
+        # pipe (4K: 1 MB -> 697, 4 MB -> 828 KB/s measured). VQIC_CWND_BYTES
+        # overrides outright; VQIC_RTT_EST_S tunes the RTT estimate; floor
+        # 1 MB (small carriers are already saturated by it).
+        _B = group_capacity(args.width, args.height)
+        _cap = _B * args.fps / max(1, args.copies)
+        _rtt_est = float(os.environ.get('VQIC_RTT_EST_S', '1.7'))
+        video_cc.set_window(max(1 << 20, int(2 * _cap * _rtt_est)))
         self.stats = {'up': 0, 'down': 0}
         self.quic = None
         self.vq = None

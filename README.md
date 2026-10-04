@@ -36,8 +36,9 @@ Three generations live side by side (oldest → newest); each is self-contained.
 
 Shared core: `tunnel_core.py` (frame render/decode, FEC, group capacity),
 `bitcoder_fec.py` (GF(256) Cauchy MDS FEC + header/CRC), `mux.py` /
-`demux.py` (connection multiplexing), `video_cc.py` (a fixed-window
-congestion controller sized to the video pipe's BDP).
+`demux.py` (connection multiplexing), `video_cc.py` (a constant-window
+congestion controller; the node sizes it to the carrier's bandwidth-delay
+product so it scales with resolution and fps).
 
 The **current** stack is `vqic_tunnel.py` — it is the one that rides the
 video and is the one the benchmarks below refer to.
@@ -87,15 +88,17 @@ The e2e harness wires all of this up for you — see `test_vqic_e2e.py`.
 # unit (frame codec, FEC repair, mux/demux, seq wrap) — fast
 python3 test_core.py
 
-# full end-to-end, two nodes, byte-exact (default 720p)
-python3 test_vqic_e2e.py PAYLOAD_KB TIMEOUT_S [720p|1080p|4k] [copies] [crf]
+# full end-to-end, two nodes, byte-exact (default 720p @30fps)
+python3 test_vqic_e2e.py PAYLOAD_KB TIMEOUT_S [720p|1080p|4k] [copies] [crf] [fps]
 # e.g. 1 MB, 90 s budget, 720p, R=2, real-streaming CRF23
 python3 test_vqic_e2e.py 1024 90 720p 2 23
+# 60 fps doubles the group ceiling (30 groups/s) — every resolution
+python3 test_vqic_e2e.py 4096 140 720p 2 23 60
 
 # grid transport (opt-in)
 VQIC_GRID=1 python3 test_vqic_e2e.py 1024 90 720p 2 23
 
-# latency probe (clean small-write RTT through both nodes)
+# latency probe (clean small-write RTT through both nodes; LP_FPS for 60fps)
 python3 lat_probe.py
 ```
 
@@ -104,21 +107,34 @@ Older-stack e2e: `test_e2e.py`, `test_bidi.py`, `test_failover.py`,
 
 ## Measured (grid transport, CRF23, R=2, byte-exact)
 
-| Resolution | Throughput | Notes |
-|-----------:|-----------:|-------|
-| 720p | ~45 KB/s | at the R=2 ceiling (15 groups/s × 4374 B) |
-| 1080p | ~116 KB/s | at the R=2 ceiling |
-| 4K | ~500 KB/s | 8× the non-grid (full-frame) path |
+| Resolution | 30 fps | 60 fps |
+|-----------:|-------:|-------:|
+| 720p | ~43 KB/s | ~95 KB/s |
+| 1080p | ~137 KB/s | ~278 KB/s |
+| 4K | ~562 KB/s | ~810 KB/s |
 
-These sit at the theoretical R=2 ceiling (`30 fps / R × bytes-per-group`).
-Raising throughput beyond that means changing the preset (`--copies 1` for
-×2 at the cost of the redundancy copy, or higher fps), not further
+60 fps roughly doubles 720p/1080p (the group ceiling is `fps / R` groups/s:
+15 → 30). 4K gains less (×1.44) and sits well under its 1422 KB/s ceiling —
+at that geometry the bottleneck moves to encode+scale, not the tunnel.
+
+**Why 60 fps also lowers latency.** Small-write round-trip drops from ~1.7 s
+at 30 fps to ~1.07 s at 60 fps on the same 720p carrier (window floored at
+1 MB in both, so the drop is fps, not window). Faster frames flush the
+per-end quiet-detection tails more often, so an interactive write waits less
+before its partial frame ships. Tunables: `VQIC_IDLE_FLUSH_S`,
+`VQIC_DRAIN_STALE_S`.
+
+**The window is auto-sized.** `video_cc` keeps a constant window, and the
+node sizes it to the carrier's bandwidth-delay product (`2 × B × fps/R ×
+RTT`, floor 1 MB) before the QUIC connection opens. This is what makes 60
+fps pay off on 4K: at 30 fps a fixed 1 MB window is fine (BDP < 1 MB), but
+doubling fps doubles the BDP and a stale 1 MB window starves the pipe
+(4K: 1 MB → 697 KB/s, auto ≈4.9 MB → 810 KB/s). Override with
+`VQIC_CWND_BYTES`; tune the RTT estimate with `VQIC_RTT_EST_S`.
+
+Raising throughput beyond the fps ceiling means changing the preset
+(`--copies 1` for ×2 at the cost of the redundancy copy), not further
 optimization.
-
-Small-write round-trip latency is dominated by the per-end quiet-detection
-tail (a partial frame is held until the sender goes quiet), not the wire —
-the wire leg is ~0.15 s and a single frame in flight is ~50 ms. Tunables:
-`VQIC_IDLE_FLUSH_S`, `VQIC_DRAIN_STALE_S`.
 
 ## Install
 

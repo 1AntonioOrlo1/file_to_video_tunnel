@@ -43,6 +43,9 @@ W, H, FPS = (
     (3840, 2160, 30) if (len(sys.argv) > 3 and sys.argv[3] == '4k')
     else (1920, 1080, 30) if (len(sys.argv) > 3 and sys.argv[3] == '1080p')
     else (1280, 720, 30))
+# argv[6] (optional): frame rate. x264 is fast enough that 60 fps doubles
+# the group ceiling (30 groups/s instead of 15) on every resolution.
+FPS = int(sys.argv[6]) if len(sys.argv) > 6 else FPS
 COPIES = int(sys.argv[4]) if len(sys.argv) > 4 else 2
 CRF = int(sys.argv[5]) if len(sys.argv) > 5 else 0
 

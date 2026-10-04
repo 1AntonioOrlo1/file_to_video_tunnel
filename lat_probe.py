@@ -20,7 +20,7 @@ PY = sys.executable
 NODE = os.path.join(HERE, 'vqic_tunnel.py')
 ECHO = os.path.join(HERE, 'echo_srv.py')
 
-W, H, FPS = 1280, 720, 30
+W, H, FPS = 1280, 720, int(os.environ.get('LP_FPS', '30'))
 COPIES = int(os.environ.get('LP_COPIES', '2'))
 CRF = 23
 SRT_LAT = os.environ.get('LP_SRT_LAT', '100')
