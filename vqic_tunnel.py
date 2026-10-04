@@ -31,6 +31,7 @@ import argparse
 import asyncio
 import ipaddress
 import os
+import random
 import shlex
 import sys
 import time
@@ -452,7 +453,19 @@ class VideoLink:
         self._pipe_cap = int(os.environ.get('VQIC_PIPE_CAP_MB', '128')) << 20
         self.up_frames = 0
         self.up_dtg = 0            # QUIC datagrams sent into the video (up)
+        self.data_written = 0      # data frames actually written to the video
         self.down_frames = 0
+        # Forced frame drop (loss test): with probability VQIC_DROP_PCT
+        # (0-100) the send clock SKIPS writing a frame to the video. The
+        # frame physically never enters the stream, so its datagrams are
+        # never ACKed and QUIC retransmits them — the real lost-frame path
+        # (not a CRC-corrupted one). VQIC_DROP_DTA=1 (default) drops data
+        # frames only; VQIC_DROP_SEED makes the pattern reproducible.
+        self.drop_pct = float(os.environ.get('VQIC_DROP_PCT', '0'))
+        self.drop_data_only = os.environ.get('VQIC_DROP_DTA', '1') == '1'
+        _seed = os.environ.get('VQIC_DROP_SEED', '')
+        self._drop_rng = random.Random(int(_seed)) if _seed else random
+        self.drops_forced = 0
         self.on_datagrams_up = None    # set by the QUIC side
         self.on_datagrams_down = None
         self._procs = []
@@ -552,6 +565,19 @@ class VideoLink:
                 f, is_data = self.staging.pop(0), True
             else:
                 f, is_data = idle_f, False
+            # Forced frame drop (loss test): physically skip the write, so
+            # the frame never reaches the video and its datagrams are never
+            # ACKed -> QUIC retransmits them (see test_vqic_loss.py).
+            if (self.drop_pct
+                    and self._drop_rng.random() * 100 < self.drop_pct
+                    and (is_data or not self.drop_data_only)):
+                self.drops_forced += 1
+                if self.drops_forced % 100 == 1:
+                    log(f"loss-test: dropped {self.drops_forced} video frames "
+                        f"(datagrams un-ACKed -> QUIC retransmit)")
+                await asyncio.sleep(max(0.0, interval -
+                                       (asyncio.get_running_loop().time() - t0)))
+                continue
             # Backpressure: if the pipe buffer is over the cap, skip this
             # tick's write entirely. Keeps the in-memory buffer bounded
             # (no OOM at 4K) and never blocks the loop. A dropped data
@@ -581,6 +607,7 @@ class VideoLink:
                 raise
             self.up_frames += 1
             if is_data:
+                self.data_written += 1
                 tr(f"clock_out frame up_frames={self.up_frames} staging={len(self.staging)}")
             if self.up_frames % 300 == 1:
                 log(f"clock: wrote {self.up_frames} frames, "
@@ -1108,13 +1135,15 @@ class Node:
         while not self.stop.is_set():
             await asyncio.sleep(5)
             d = self.link.codec
-            log(f"stats: up={self.link.up_dtg} dtg down={self.stats['down']} dtg "
+            log(f"stats: up_dtg={self.link.up_dtg} down_dtg={self.stats['down']} "
                 f"vid_out={self.link.up_frames} vid_in={self.link.down_frames} "
+                f"data_w={self.link.data_written} sent={d.frames_sent} "
                 f"groups={d.groups} avg={d.averaged} dups={d.dups} "
                 f"bad={d.bad} idle={d.idle} resync={d.resyncs} "
                 f"render_drop={d.drops_render} clock_drop={d.drops_clock} "
+                f"drop_forced={self.link.drops_forced} "
                 f"render_q={self.link._render_q.qsize()} "
-                f"local up={self.local.n_up} down={self.local.n_down} B")
+                f"local_up={self.local.n_up} local_down={self.local.n_down} B")
 
 
 class QuicSender:

@@ -100,6 +100,10 @@ VQIC_GRID=1 python3 test_vqic_e2e.py 1024 90 720p 2 23
 
 # latency probe (clean small-write RTT through both nodes; LP_FPS for 60fps)
 python3 lat_probe.py
+
+# forced frame-loss: physically removes video frames (VQIC_DROP_PCT) and
+# proves QUIC retransmits their data — payload stays byte-exact
+python3 test_vqic_loss.py PAYLOAD_KB TIMEOUT_S [drop_pct]   # e.g. 512 150 40
 ```
 
 Older-stack e2e: `test_e2e.py`, `test_bidi.py`, `test_failover.py`,
@@ -135,6 +139,12 @@ doubling fps doubles the BDP and a stale 1 MB window starves the pipe
 Raising throughput beyond the fps ceiling means changing the preset
 (`--copies 1` for ×2 at the cost of the redundancy copy), not further
 optimization.
+
+**Frame loss** (`test_vqic_loss.py`, frames physically removed from the
+video): 512 KB stays byte-exact at any tested loss; the frame count in the
+video really shrinks and QUIC retransmits the missing frames' datagrams
+(factor ≈ 1/(1−p)). 720p grid CRF23 R=2: 0% → 13 s, 20% → 24 s, 40% →
+40 s, 60% → 98 s.
 
 ## Install
 
